@@ -12,7 +12,6 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDateTime;
-import java.util.ArrayList;
 import java.util.List;
 
 @Slf4j
@@ -39,32 +38,18 @@ public class RecommendationService {
 
         if (allMenus.isEmpty()) {
             log.warn("No menus available in database");
-            return new ArrayList<>();
+            return List.of();
         }
-
-        log.debug("Found {} menus in database", allMenus.size());
 
         // 이력이 없으면 랜덤 추천
         if (histories.isEmpty()) {
-            log.debug("No history found, returning random recommendations");
-            List<MenuRecommendationDto> randomList = new ArrayList<>();
-
-            // count 개수만큼 랜덤 추천
-            for (int i = 0; i < Math.min(count, allMenus.size()); i++) {
-                MenuRecommendationDto random = recommendationAlgorithm.randomRecommend(allMenus);
-                if (random != null) {
-                    randomList.add(random);
-                }
-            }
-
-            log.debug("Returning {} random recommendations", randomList.size());
-            return randomList;
+            log.debug("No history found, returning random recommendation");
+            MenuRecommendationDto random = recommendationAlgorithm.randomRecommend(allMenus);
+            return random != null ? List.of(random) : List.of();
         }
 
         // 알고리즘으로 추천
-        List<MenuRecommendationDto> recommendations = recommendationAlgorithm.recommend(histories, allMenus, count);
-        log.debug("Returning {} algorithm-based recommendations", recommendations.size());
-        return recommendations;
+        return recommendationAlgorithm.recommend(histories, allMenus, count);
     }
 
     /**
@@ -109,5 +94,19 @@ public class RecommendationService {
      */
     public List<Object[]> getMostEatenMenus(String userId) {
         return mealHistoryRepository.findMostEatenMenus(userId);
+    }
+
+    /**
+     * 사용자의 전체 이력 조회
+     */
+    public List<MealHistory> getUserHistories(String userId) {
+        return mealHistoryRepository.findByKakaoUserId(userId);
+    }
+
+    /**
+     * 전체 메뉴 조회
+     */
+    public List<Menu> getAllMenus() {
+        return menuService.getAllMenus();
     }
 }

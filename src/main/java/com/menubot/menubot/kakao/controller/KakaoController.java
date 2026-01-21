@@ -6,14 +6,14 @@ import com.menubot.menubot.menu.dto.MenuRecommendationDto;
 import com.menubot.menubot.menu.entity.MealHistory;
 import com.menubot.menubot.menu.entity.MealType;
 import com.menubot.menubot.menu.service.RecommendationService;
+import com.menubot.menubot.menu.util.parser.MessageParser;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
+import java.time.LocalTime;
 import java.util.List;
-import java.util.regex.Matcher;
-import java.util.regex.Pattern;
 
 @Slf4j
 @RestController
@@ -22,6 +22,7 @@ import java.util.regex.Pattern;
 public class KakaoController {
 
     private final RecommendationService recommendationService;
+    private final MessageParser messageParser;
 
     /**
      * 메뉴 추천 엔드포인트
@@ -81,7 +82,7 @@ public class KakaoController {
     }
 
     /**
-     * 식사 기록 엔드포인트
+     * 식사 기록 엔드포인트 (개선된 파서 사용)
      */
     @PostMapping(value = "/record", produces = "application/json;charset=UTF-8")
     public ResponseEntity<KakaoResponse> recordMeal(@RequestBody KakaoRequest request) {
@@ -90,33 +91,48 @@ public class KakaoController {
 
         log.info("Record request - userId: {}, utterance: {}", userId, utterance);
 
-        // 메시지 파싱: "점심 먹었어 김치찌개" 또는 "저녁에 파스타 먹음"
-        ParsedMeal parsed = parseMealMessage(utterance);
+        try {
+            // 개선된 파서 사용
+            MessageParser.ParsedMeal parsed = messageParser.parseMealMessage(utterance);
 
-        if (parsed == null || parsed.menuName == null) {
+            if (parsed == null || parsed.menuName == null) {
+                return ResponseEntity.ok(
+                        KakaoResponse.createSimpleText(
+                                "메뉴 이름을 찾을 수 없어요 😅\n\n" +
+                                        "이렇게 말씀해주세요:\n" +
+                                        "• \"김치찌개 먹었어\"\n" +
+                                        "• \"점심에 파스타\"\n" +
+                                        "• \"저녁 먹었어 돈카츠\""
+                        )
+                );
+            }
+
+            // 식사 기록 저장
+            MealHistory history = recommendationService.recordMeal(
+                    userId,
+                    parsed.menuName,
+                    parsed.mealType,
+                    null
+            );
+
+            String response = String.format(
+                    "✅ 기록 완료!\n\n" +
+                            "%s에 '%s' 드셨군요.\n" +
+                            "다음 추천에 반영할게요! 😊",
+                    parsed.mealType.getDescription(),
+                    history.getMenu().getName()
+            );
+
+            return ResponseEntity.ok(KakaoResponse.createSimpleText(response));
+
+        } catch (Exception e) {
+            log.error("Error recording meal", e);
             return ResponseEntity.ok(
                     KakaoResponse.createSimpleText(
-                            "어떤 메뉴를 드셨는지 알려주세요!\n" +
-                                    "예: '점심 먹었어 김치찌개' 또는 '저녁에 파스타'"
+                            "기록 중 오류가 발생했어요 😭\n다시 시도해주세요!"
                     )
             );
         }
-
-        // 식사 기록 저장
-        MealHistory history = recommendationService.recordMeal(
-                userId,
-                parsed.menuName,
-                parsed.mealType,
-                null // 평점은 나중에 추가 기능으로
-        );
-
-        String response = String.format(
-                "✅ 기록했어요!\n%s에 '%s' 드셨군요.\n\n다음 추천에 반영할게요!",
-                parsed.mealType.getDescription(),
-                parsed.menuName
-        );
-
-        return ResponseEntity.ok(KakaoResponse.createSimpleText(response));
     }
 
     /**
@@ -156,7 +172,7 @@ public class KakaoController {
      */
     @GetMapping("/health")
     public ResponseEntity<String> health() {
-        return ResponseEntity.ok("Menu Bot is running!");
+        return ResponseEntity.ok("Menu Bot is running! (Improved Version)");
     }
 
     // === 유틸리티 메서드 ===
@@ -169,43 +185,7 @@ public class KakaoController {
         }
 
         // 기본값: 현재 시간 기준으로 판단
-        int hour = java.time.LocalTime.now().getHour();
+        int hour = LocalTime.now().getHour();
         return (hour >= 11 && hour < 15) ? MealType.LUNCH : MealType.DINNER;
-    }
-
-    private ParsedMeal parseMealMessage(String utterance) {
-        MealType mealType = determineMealType(utterance);
-
-        // 패턴 매칭: "점심 먹었어 김치찌개", "저녁에 파스타 먹음" 등
-        Pattern pattern1 = Pattern.compile("(점심|저녁).*?([가-힣]+)\\s*(먹|드)");
-        Pattern pattern2 = Pattern.compile("(먹|드).*?([가-힣]{2,})");
-
-        Matcher matcher1 = pattern1.matcher(utterance);
-        if (matcher1.find()) {
-            String menuName = matcher1.group(2).trim();
-            if (menuName.length() >= 2) {
-                return new ParsedMeal(mealType, menuName);
-            }
-        }
-
-        Matcher matcher2 = pattern2.matcher(utterance);
-        if (matcher2.find()) {
-            String menuName = matcher2.group(2).trim();
-            if (menuName.length() >= 2 && !menuName.equals("먹었") && !menuName.equals("드셨")) {
-                return new ParsedMeal(mealType, menuName);
-            }
-        }
-
-        return null;
-    }
-
-    private static class ParsedMeal {
-        MealType mealType;
-        String menuName;
-
-        ParsedMeal(MealType mealType, String menuName) {
-            this.mealType = mealType;
-            this.menuName = menuName;
-        }
     }
 }
